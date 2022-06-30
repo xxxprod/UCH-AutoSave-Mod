@@ -8,6 +8,9 @@ AutoSave [OriginalName] player1, playerN yyyy.MM.dd_HHmm
 
 So consecutive saves in one game will overwrite the same savegame and NOT create new ones. Only after going back to lobby and restarting will a new timestamp be generated which results in a new savegame.
 
+## Installation
+BepInEx v5 needs to be installed and the mod must be placed in the **%UCHRoot%\BepInEx\plugins** folder.
+
 ## Configuration
 To disable the mod change the file **%UCHRoot%\BepInEx\config\UCHAutoSaveMod.cfg** and set 
 
