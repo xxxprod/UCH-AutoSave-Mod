@@ -23,7 +23,7 @@ namespace UCHAutoSaveMod
             _autoSaveEnabled = Config.Bind("General", "AutoSave Enabled", true, "Set to false to disable AutoSave.");
 
             GameEventManager.ChangeListener<PiecePlacedEvent>(this, true);
-            GameEventManager.ChangeListener<StartPhaseEvent>(this, true);
+            GameEventManager.ChangeListener<DestroyPieceEvent>(this, true);
             GameEventManager.ChangeListener<EndPhaseEvent>(this, true);
 
             // Plugin startup logic
@@ -32,7 +32,7 @@ namespace UCHAutoSaveMod
 
         public void handleEvent(GameEvent.GameEvent e)
         {
-            if (e is PiecePlacedEvent)
+            if (e is PiecePlacedEvent or DestroyPieceEvent)
             {
                 if (!_autoSaveEnabled.Value)
                     return;
@@ -79,21 +79,26 @@ namespace UCHAutoSaveMod
             return currentLevelName;
         }
 
-        private static void SaveLevel(string autoSaveName)
+        private static void SaveLevel(string name)
         {
             QuickSaver quickSaver = LobbyManager.instance.CurrentGameController.GetComponent<QuickSaver>();
 
             XmlDocument currentXmlSnapshot = quickSaver.GetCurrentXmlSnapshot(false);
             byte[] compressedBytes = QuickSaver.GetCompressedBytesFromXmlDoc(currentXmlSnapshot);
 
-            string fileName = QuickSaver.LocalSavesFolder + "/" + autoSaveName +
-                              QuickSaver.GetLocalSaveSuffixForLevelType(FeaturedQuickFilter.LevelTypes.Versus) + ".snapshot";
+            string fileName = QuickSaver.LocalSavesFolder + "/" + name +
+                              QuickSaver.GetLocalSaveSuffixForLevelType(FeaturedQuickFilter.LevelTypes.Versus) +
+                              ".snapshot";
 
             try
             {
                 File.WriteAllBytes(fileName, compressedBytes);
+
                 quickSaver.SaveLocalThumbnail(
-                    QuickSaver.GetSnapshotNameWithoutSuffix(Path.GetFileNameWithoutExtension(fileName)));
+                    QuickSaver.GetSnapshotNameWithoutSuffix(
+                        Path.GetFileNameWithoutExtension(fileName))
+                );
+
                 Debug.Log($"AutoSaved {fileName}");
             }
             catch (Exception ex)
