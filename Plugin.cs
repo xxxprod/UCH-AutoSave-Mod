@@ -33,30 +33,23 @@ namespace UCHAutoSaveMod
             Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_GUID} is loaded!");
         }
 
-        private void LateUpdate()
-        {
-            if (!_saveTask.Wait(0))
-                return;
-
-            if (_autoSavePending)
-            {
-                _autoSavePending = false;
-                _saveTask = SaveLevel(_autoSaveFileName);
-            }
-        }
-
         public void handleEvent(GameEvent.GameEvent e)
         {
             if (e is EndPhaseEvent { Phase: GameControl.GamePhase.START })
             {
-                _autoSaveFileName = $"AutoSave [{GetLevelName()}] {DateTime.UtcNow:yyyy.MM.dd_HHmm}";
+                var autoSaveName = $"AutoSave [{GetLevelName()}] {DateTime.Now:yyyy.MM.dd_HHmm}";
 
                 var playerNames = LobbyManager.instance.GetLobbyPlayers()
                     .Select(player => player.playerName)
                     .ToArray();
 
                 if (playerNames.Length > 1)
-                    _autoSaveFileName += " " + string.Join(", ", playerNames);
+                    autoSaveName += " " + string.Join(", ", playerNames);
+
+                _autoSaveFileName = QuickSaver.LocalSavesFolder + "/" + 
+                                    string.Join("_", autoSaveName.Split(Path.GetInvalidFileNameChars())) +
+                                    QuickSaver.GetLocalSaveSuffixForLevelType(FeaturedQuickFilter.LevelTypes.Versus) +
+                                    ".snapshot";
 
                 Debug.Log($"Set AutoSave file to '{_autoSaveFileName}'");
             }
@@ -67,18 +60,36 @@ namespace UCHAutoSaveMod
 
                 if (LobbyManager.instance.CurrentGameController.Phase != GameControl.GamePhase.PLACE)
                     return;
-                
+
                 _autoSavePending = true;
             }
         }
 
-        private static async Task SaveLevel(string name)
+        private void LateUpdate()
         {
-            string fileName = QuickSaver.LocalSavesFolder + "/" + name +
-                              QuickSaver.GetLocalSaveSuffixForLevelType(FeaturedQuickFilter.LevelTypes.Versus) +
-                              ".snapshot";
+            try
+            {
+                if (!_saveTask.Wait(0))
+                    return;
 
-            Debug.Log($"Start AutoSave to '{fileName}'");
+                if (!_autoSavePending)
+                    return;
+
+                _autoSavePending = false;
+                _saveTask = SaveLevel();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError(ex.GetBaseException());
+
+                _autoSavePending = false;
+                _saveTask = Task.CompletedTask;
+            }
+        }
+
+        private async Task SaveLevel()
+        {
+            Debug.Log($"Start AutoSave to '{_autoSaveFileName}'");
 
             QuickSaver quickSaver = LobbyManager.instance.CurrentGameController.GetComponent<QuickSaver>();
 
@@ -86,14 +97,14 @@ namespace UCHAutoSaveMod
 
             byte[] compressedBytes = await Task.Run(() => QuickSaver.GetCompressedBytesFromXmlDoc(currentXmlSnapshot));
 
-            File.WriteAllBytes(fileName, compressedBytes);
+            File.WriteAllBytes(_autoSaveFileName, compressedBytes);
 
             quickSaver.SaveLocalThumbnail(
                 QuickSaver.GetSnapshotNameWithoutSuffix(
-                    Path.GetFileNameWithoutExtension(fileName))
+                    Path.GetFileNameWithoutExtension(_autoSaveFileName))
             );
 
-            Debug.Log($"AutoSaved '{fileName}'");
+            Debug.Log($"AutoSaved '{_autoSaveFileName}'");
         }
 
         private static string GetLevelName()
