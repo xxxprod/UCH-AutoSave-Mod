@@ -14,14 +14,17 @@ namespace UCHAutoSaveMod
     [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
     public class Plugin : BaseUnityPlugin, IGameEventListener
     {
-        private ConfigEntry<bool> _autoSaveEnabled;
+        private ConfigEntry<bool> _partyAutoSaveEnabled;
+        private ConfigEntry<bool> _freePlayAutoSaveEnabled;
+
         private Task _saveTask = Task.CompletedTask;
         private string _autoSaveFileName;
         private bool _autoSavePending;
 
         private void Awake()
         {
-            _autoSaveEnabled = Config.Bind("General", "AutoSave Enabled", true, "Set to false to disable AutoSave.");
+            _partyAutoSaveEnabled = Config.Bind("General", "AutoSave in Party", true, "Set to false to disable AutoSave in Party games.");
+            _freePlayAutoSaveEnabled = Config.Bind("General", "AutoSave in FreePlay", true, "Set to false to disable AutoSave in FreePlay games.");
 
             GameEventManager.ChangeListener<PiecePlacedEvent>(this, true);
             GameEventManager.ChangeListener<DestroyPieceEvent>(this, true);
@@ -44,8 +47,15 @@ namespace UCHAutoSaveMod
             }
             else if (e is PiecePlacedEvent or DestroyPieceEvent)
             {
-                if (!_autoSaveEnabled.Value)
-                    return;
+                var gameMode = GameSettings.GetInstance().GameMode;
+                
+                switch (gameMode)
+                {
+                    case GameState.GameMode.CHALLENGE:
+                    case GameState.GameMode.PARTY or GameState.GameMode.CREATIVE when !_partyAutoSaveEnabled.Value:
+                    case GameState.GameMode.FREEPLAY when !_freePlayAutoSaveEnabled.Value:
+                        return;
+                }
 
                 if (LobbyManager.instance.CurrentGameController.Phase != GameControl.GamePhase.PLACE)
                     return;
