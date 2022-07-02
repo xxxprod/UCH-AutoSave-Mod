@@ -14,8 +14,6 @@ namespace UCHAutoSaveMod
     [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
     public class Plugin : BaseUnityPlugin, IGameEventListener
     {
-        private static readonly Regex AutoSaveNameRegex = new(@"^AutoSave \[(?<LevelName>.*?)\].*", RegexOptions.Compiled);
-
         private ConfigEntry<bool> _autoSaveEnabled;
         private Task _saveTask = Task.CompletedTask;
         private string _autoSaveFileName;
@@ -37,17 +35,8 @@ namespace UCHAutoSaveMod
         {
             if (e is EndPhaseEvent { Phase: GameControl.GamePhase.START })
             {
-                var autoSaveName = $"AutoSave [{GetLevelName()}] {DateTime.Now:yyyy.MM.dd_HHmm}";
-
-                var playerNames = LobbyManager.instance.GetLobbyPlayers()
-                    .Select(player => player.playerName)
-                    .ToArray();
-
-                if (playerNames.Length > 1)
-                    autoSaveName += " " + string.Join(", ", playerNames);
-
-                _autoSaveFileName = QuickSaver.LocalSavesFolder + "/" + 
-                                    string.Join("_", autoSaveName.Split(Path.GetInvalidFileNameChars())) +
+                _autoSaveFileName = QuickSaver.LocalSavesFolder + "/" +
+                                    $"AutoSave {DateTime.Now:yyyy.MM.dd HHmm}" +
                                     QuickSaver.GetLocalSaveSuffixForLevelType(FeaturedQuickFilter.LevelTypes.Versus) +
                                     ".snapshot";
 
@@ -105,23 +94,6 @@ namespace UCHAutoSaveMod
             );
 
             Debug.Log($"AutoSaved '{_autoSaveFileName}'");
-        }
-
-        private static string GetLevelName()
-        {
-            string currentLevelName = GameState.GetInstance().currentSnapshotInfo.snapshotName.Length > 0
-                ? GameState.GetInstance().currentSnapshotInfo.snapshotName
-                : LobbyManager.instance.CurrentGameController.LevelLayout.thisLevelis.ToString();
-
-            if (currentLevelName.Length > 0)
-            {
-                var match = AutoSaveNameRegex.Match(currentLevelName);
-
-                if (match.Success)
-                    currentLevelName = match.Groups["LevelName"].Value;
-            }
-
-            return currentLevelName;
         }
     }
 }
