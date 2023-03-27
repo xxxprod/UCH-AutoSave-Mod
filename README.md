@@ -1,18 +1,13 @@
-# UCH-AutoSave-Mod
-This mod enables auto saves for the game Ultimate Chicken Horse. When enabled it will automatically save the current level in any Party, Creative or Freeplay game whenever an item has been placed or destroyed.
+# UCH-PlayerTracker-Mod
+This mod draws a line behind the character in its color.
 
-The levels are saved as shown below with the timestamp of the start of the session:
-```
-AutoSave yyyy.MM.dd HHmm
-```
-
-So consecutive saves in one game will overwrite the same savegame and NOT create new ones. Only after going back to lobby and restarting will a new timestamp be generated which results in a new savegame.
+![alt text](Screenshots\PlayerTrackerInLobby.png "Title")
 
 ## Installation
 BepInEx v5 needs to be installed and the mod must be placed in the **%UCHRoot%\BepInEx\plugins** folder.
 
 ## Configuration
-To disable the mod change the file **%UCHRoot%\BepInEx\config\UCHAutoSaveMod.cfg** and set 
+To disable the mod change the file **%UCHRoot%\BepInEx\config\UCHPlayerTrackerMod.cfg** and set 
 
 ```
 AutoSave Enabled = false
