@@ -1,156 +1,109 @@
 ﻿using System;
-using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using System.Xml;
 using BepInEx;
 using BepInEx.Configuration;
+using GameEvent;
 using UnityEngine;
-namespace UCHPlayerTrackerMod;
 
-[BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
-public class Plugin : BaseUnityPlugin
+namespace UCHAutoSaveMod
 {
-    private int framesLeft;
-
-    private (Queue<Vector3> positions, LineRenderer renderer)[] _lines;
-    private ConfigEntry<int> _trackingLength;
-    private static ConfigEntry<int> _skipFrames;
-    private ConfigEntry<float> _lineWidthStart;
-    private ConfigEntry<float> _lineWidthEnd;
-    private ConfigEntry<bool> _enabled;
-
-    private void Awake()
+    [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
+    public class Plugin : BaseUnityPlugin, IGameEventListener
     {
-        _enabled = Config.Bind("General", "Enabled", true, "To disable this mod set this setting to 'false'.");
-        _enabled.SettingChanged += (_, _) => ClearLines();
-        _trackingLength = Config.Bind("General", "TrackingLength", 120, "The length of the line in timeSteps (60 -> 1s).");
-        _skipFrames = Config.Bind("General", "SkipFrames", 0, "Skip n frames before tracking next frame.");
-        _lineWidthStart = Config.Bind("General", "LineStartWidth", 0.1f, "Width of the tracking line at the start.");
-        _lineWidthStart.SettingChanged += (_, _) => UpdateLineRenderer(a => a.endWidth = _lineWidthStart.Value);
-        _lineWidthEnd = Config.Bind("General", "LineEndWidth", 0.1f, "Width of the tracking line at the end.");
-        _lineWidthEnd.SettingChanged += (_, _) => UpdateLineRenderer(a => a.startWidth = _lineWidthEnd.Value);
+        private ConfigEntry<bool> _partyAutoSaveEnabled;
+        private ConfigEntry<bool> _freePlayAutoSaveEnabled;
 
+        private Task _saveTask = Task.CompletedTask;
+        private string _autoSaveFileName;
+        private bool _autoSavePending;
 
-        _lines = new (Queue<Vector3>, LineRenderer)[8];
-        for (int i = 0; i < _lines.Length; i++)
+        private void Awake()
         {
-            _lines[i] = (new Queue<Vector3>(), CreateLineRenderer());
+            _partyAutoSaveEnabled = Config.Bind("General", "AutoSave in Party", true, "Set to false to disable AutoSave in Party games.");
+            _freePlayAutoSaveEnabled = Config.Bind("General", "AutoSave in FreePlay", true, "Set to false to disable AutoSave in FreePlay games.");
+
+            GameEventManager.ChangeListener<PiecePlacedEvent>(this, true);
+            GameEventManager.ChangeListener<DestroyPieceEvent>(this, true);
+            GameEventManager.ChangeListener<EndPhaseEvent>(this, true);
+
+            // Plugin startup logic
+            Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_GUID} is loaded!");
         }
 
-        // Plugin startup logic
-        Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_GUID} is loaded!");
-    }
-
-    private void ClearLines()
-    {
-        foreach ((Queue<Vector3> positions, LineRenderer renderer) in _lines)
+        public void handleEvent(GameEvent.GameEvent e)
         {
-            positions.Clear();
-            renderer.positionCount = positions.Count;
-            renderer.SetPositions(positions.ToArray());
-        }
-    }
-
-    private void UpdateLineRenderer(Action<LineRenderer> action)
-    {
-        foreach ((Queue<Vector3> positions, LineRenderer renderer) in _lines)
-        {
-            action(renderer);
-        }
-    }
-
-    private LineRenderer CreateLineRenderer()
-    {
-        var obj = new GameObject
-        {
-            transform =
+            if (e is EndPhaseEvent { Phase: GameControl.GamePhase.START })
             {
-                parent = transform
+                _autoSaveFileName = QuickSaver.LocalSavesFolder + "/" +
+                                    $"AutoSave {DateTime.Now:yyyy.MM.dd HHmm}" +
+                                    QuickSaver.GetLocalSaveSuffixForLevelType(FeaturedQuickFilter.LevelTypes.Versus) +
+                                    ".snapshot";
+
+                Debug.Log($"Set AutoSave file to '{_autoSaveFileName}'");
             }
-        };
-        var lineRenderer = obj.AddComponent<LineRenderer>();
-        lineRenderer.material = new Material(Shader.Find("Sprites/Default"));
-        lineRenderer.startWidth = _lineWidthEnd.Value;
-        lineRenderer.endWidth = _lineWidthStart.Value;
-        lineRenderer.endColor = Color.white;
-        lineRenderer.useWorldSpace = true;
-        return lineRenderer;
-    }
-
-    private void FixedUpdate()
-    {
-        if (!_enabled.Value)
-            return;
-        try
-        {
-            if (framesLeft-- > 0)
-                return;
-
-            framesLeft = _skipFrames.Value;
-
-            foreach ((Character character, Queue<Vector3> positions, LineRenderer renderer) in GetPlayers())
+            else if (e is PiecePlacedEvent or DestroyPieceEvent)
             {
-                Vector3 pos = character.transform.position;
-
-                positions.Enqueue(pos);
-
-                if (positions.Count > _trackingLength.Value)
-                    positions.Dequeue();
-
-                renderer.positionCount = positions.Count;
-                renderer.SetPositions(positions.ToArray());
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError(ex.Message + ex.StackTrace);
-        }
-    }
-
-    private IEnumerable<(Character character, Queue<Vector3> positions, LineRenderer renderer)> GetPlayers()
-    {
-        if (LobbyManager.instance == null)
-            yield break;
-
-        if (LobbyManager.instance.CurrentGameController != null)
-        {
-            Dictionary<int, GamePlayer> players = LobbyManager.instance.CurrentGameController.CurrentPlayerQueue
-                .ToDictionary(a => a.networkNumber - 1);
-
-            for (int i = 0; i < _lines.Length; i++)
-            {
-                (Queue<Vector3> positions, LineRenderer renderer) = _lines[i];
-
-                if (!players.TryGetValue(i, out GamePlayer gamePlayer) || gamePlayer.CharacterInstance == null)
+                var gameMode = GameSettings.GetInstance().GameMode;
+                
+                switch (gameMode)
                 {
-                    positions.Clear();
-                    renderer.positionCount = positions.Count;
-                    renderer.SetPositions(positions.ToArray());
-                    continue;
+                    case GameState.GameMode.CHALLENGE:
+                    case GameState.GameMode.PARTY or GameState.GameMode.CREATIVE when !_partyAutoSaveEnabled.Value:
+                    case GameState.GameMode.FREEPLAY when !_freePlayAutoSaveEnabled.Value:
+                        return;
                 }
 
-                renderer.startColor = gamePlayer.PlayerColor;
-                //renderer.material.color = gamePlayer.PlayerColor;
-                yield return (gamePlayer.CharacterInstance, positions, renderer);
+                if (LobbyManager.instance.CurrentGameController.Phase != GameControl.GamePhase.PLACE)
+                    return;
+
+                _autoSavePending = true;
             }
         }
-        else
+
+        private void LateUpdate()
         {
-            Dictionary<int, LobbyPlayer> players = LobbyManager.instance.GetLobbyPlayers().ToDictionary(a => a.networkNumber - 1);
-            for (int i = 0; i < _lines.Length; i++)
+            try
             {
-                (Queue<Vector3> positions, LineRenderer renderer) = _lines[i];
+                if (!_saveTask.Wait(0))
+                    return;
 
-                if (!players.TryGetValue(i, out LobbyPlayer lobbyPlayer) || lobbyPlayer.CharacterInstance == null)
-                {
-                    positions.Clear();
-                    renderer.positionCount = positions.Count;
-                    renderer.SetPositions(positions.ToArray());
-                    continue;
-                }
+                if (!_autoSavePending)
+                    return;
 
-                renderer.material.color = lobbyPlayer.PlayerColor;
-                yield return (lobbyPlayer.CharacterInstance, positions, renderer);
+                _autoSavePending = false;
+                _saveTask = SaveLevel();
             }
+            catch (Exception ex)
+            {
+                Debug.LogError(ex.GetBaseException());
+
+                _autoSavePending = false;
+                _saveTask = Task.CompletedTask;
+            }
+        }
+
+        private async Task SaveLevel()
+        {
+            Debug.Log($"Start AutoSave to '{_autoSaveFileName}'");
+
+            QuickSaver quickSaver = LobbyManager.instance.CurrentGameController.GetComponent<QuickSaver>();
+
+            XmlDocument currentXmlSnapshot = quickSaver.GetCurrentXmlSnapshot(false);
+
+            byte[] compressedBytes = await Task.Run(() => QuickSaver.GetCompressedBytesFromXmlDoc(currentXmlSnapshot));
+
+            File.WriteAllBytes(_autoSaveFileName, compressedBytes);
+
+            quickSaver.SaveLocalThumbnail(
+                QuickSaver.GetSnapshotNameWithoutSuffix(
+                    Path.GetFileNameWithoutExtension(_autoSaveFileName))
+            );
+
+            Debug.Log($"AutoSaved '{_autoSaveFileName}'");
         }
     }
 }
